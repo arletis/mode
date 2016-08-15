@@ -246,7 +246,7 @@ MODULE mode
 	       if (is_valid .and. (mask(i,j) .EQ. 0) ) then		  
                   call singleObj_Ident_Attrib(i, j, restoreField, rowSize, colSize, treshold, mask, totalObj, maskObj, perimeter, area, xcent, ycent, angle, aspect_ratio, area_hull, complexity, per_linked, total_linked)		  
 	
-		  if (area .GE. area_tresh) then
+		  if (area .GE. area_tresh) then ! Creating temporal list to save objects attributes
 		     allocate(attrs_aux)
 		     allocate(attrs_aux%next)
 		     attrs_aux%next => objects_linked
@@ -287,7 +287,13 @@ MODULE mode
             ENDDO
          ENDDO
 
+	 ! Save the attributes into an array
+	 allocate(objects(totalObj))
+	 dir_aux => objects_linked
+	 i=0
+	 Do while ()
 
+	 Enddo
 
 	 DO i=1, rowSize            
                write(*,*) (mask(i,j), j=1, colSize)         
