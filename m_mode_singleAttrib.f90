@@ -15,7 +15,9 @@
 ! MODULE: m_mode_singleAttrib.f90
 !
 ! DESCRIPTON:
-! 
+! In this module are defined the subroutine to calculate object attributes: centroid,
+! orientation, aspect ratio, complexidade. Also, quickhull and quicksort algorithm 
+! used in the calculation of the complexity.
 
 
 MODULE m_mode_singleAttrib
@@ -57,15 +59,62 @@ MODULE m_mode_singleAttrib
    contains
 
     !**************************************************************************************************************************************
+      Subroutine x_centroide(total_pts, area, xcent)
+         Implicit None
+	 type(point), pointer, intent(in)	:: total_pts(:)
+	 integer, intent(in)			:: area
+	 integer, intent(out)			:: xcent
+
+	 integer		:: i, j, suma	 
+
+	 suma = 0
+	 Do i=1, area
+	   suma = suma + total_pts(i)%x
+	 Enddo
+
+	 xcent = INT(suma/area)
+	 !print*, 'suma', suma, 'area', area, 'xcent', xcent
+	 !xcent = INT(temp)
+	 !print*, 'xcent', xcent
+	 return
+      End Subroutine
+    !**************************************************************************************************************************************
+
+
+    !**************************************************************************************************************************************
+      Subroutine y_centroide(total_pts, area, ycent)
+         Implicit None
+	 type(point), pointer, intent(in)	:: total_pts(:)
+	 integer, intent(in)			:: area
+	 integer, intent(out)			:: ycent
+
+	 integer		:: i, j, suma	 
+
+	 suma = 0
+	 Do i=1, area
+	   suma = suma + total_pts(i)%y
+	 Enddo
+
+	 ycent = INT(suma/area)
+	 !print*, 'suma', suma, 'area', area, 'xcent', ycent
+	 !xcent = INT(temp)
+	 !print*, 'xcent', xcent
+	 return
+      End Subroutine
+    !**************************************************************************************************************************************
+
+
+
+    !**************************************************************************************************************************************
      !The subroutine calculates the orientation of the objects
-      Subroutine object_angle(per_points, xcent, ycent, perimeter, pts_per, angle)        
+      Subroutine object_angle(pts_per, xcent, ycent, perimeter, angle)        
 
 	Implicit None
 	! INPUT PARAMETERS:
-	type(mark), pointer			:: per_points
+	type(point), pointer, intent(in)			:: pts_per(:)
         integer, intent(in)			:: xcent, ycent, perimeter	
 	!OUTPUT PARAMETERS:
-	type(point), pointer, intent(out)	:: pts_per(:)
+	!type(point), pointer, intent(out)	:: pts_per(:)
 	real, intent(out)			:: angle
 
 	!type(point), pointer	:: pts_per(:)
@@ -76,19 +125,19 @@ MODULE m_mode_singleAttrib
 	sumUp=0.0
 	sumDown=0.0
 
-	allocate(pts_per(perimeter))
+	!allocate(pts_per(perimeter))
 
-	Do while (associated(per_points))
+	!Do while (associated(per_points))
 	   do i=1, perimeter
-	      pts_per(i)%x = per_points%x
-	      pts_per(i)%y = per_points%y
+	      !pts_per(i)%x = per_points%x
+	      !pts_per(i)%y = per_points%y
 
 	      sumUp = sumUp + (pts_per(i)%x - xcent) * (pts_per(i)%y - ycent)
 	      sumDown = sumDown + (pts_per(i)%x - xcent)**2 - (pts_per(i)%y - ycent)**2
 	
-	      per_points => per_points%next
+	      !per_points => per_points%next
 	   enddo
-        Enddo
+        !Enddo
 
 	angle = 0.5*ATAN2(2*sumUp,sumDown)
 
@@ -489,7 +538,6 @@ MODULE m_mode_singleAttrib
     !**************************************************************************************************************************************
       ! determine on which side of a line is a point located
       Subroutine orientation(p1, p2, p3, size_line)
-
 	 Implicit None
 	 type(point), pointer, intent(in)	:: p1, p2, p3
 	 integer, intent(out) 			:: size_line
@@ -499,11 +547,9 @@ MODULE m_mode_singleAttrib
  	 !print*, '   p2', p2
 	 !print*, '   p3', p3
 
-	 size_line = (p2%x - p1%x)*(p3%y - p1%y) - (p2%y - p1%y)*(p3%x - p1%x)
-	 
+	 size_line = (p2%x - p1%x)*(p3%y - p1%y) - (p2%y - p1%y)*(p3%x - p1%x)	 
 	 !print*, '   size_line', size_line 
          return
-
       End Subroutine
     !**************************************************************************************************************************************
 
@@ -514,7 +560,6 @@ MODULE m_mode_singleAttrib
     !**************************************************************************************************************************************
       ! find a pseudodistance from line to point
       Subroutine distance(p1, p2, p3, pdist)
-
 	 Implicit None
 	 type(point), pointer, intent(in)	:: p1, p2, p3
 	 real, intent(out) 			:: pdist
@@ -529,10 +574,8 @@ MODULE m_mode_singleAttrib
 	 if (pdist .LT. 0) then
 	    pdist = (-1)*pdist
 	 endif
-
          !print*, '   distance', pdist
          return
-
       End Subroutine
     !**************************************************************************************************************************************
 
@@ -554,7 +597,6 @@ MODULE m_mode_singleAttrib
 	   pivot = low
 	   i = low
 	   j = high
-
 	   !print*
 	   !print*, '   i, j', i, j
 
@@ -569,7 +611,6 @@ MODULE m_mode_singleAttrib
 	         new_arr => arr(i)
 	         call orientation(arr_aux, arr_aux2, new_arr, size_line)
 	      enddo
-
 	      !print*, '     new i', i	
 	      
 	      arr_aux3 => arr(j)
@@ -579,7 +620,6 @@ MODULE m_mode_singleAttrib
 	         new_arr => arr(j)
 	         call orientation(arr_aux, arr_aux2, new_arr, size_line)
 	      enddo
-
 	      !print*, '     new j', j
 
 	      if (i .LT. j) then	         
@@ -603,13 +643,11 @@ MODULE m_mode_singleAttrib
 	   
 	   arr(j)%x = tempx
 	   arr(j)%y = tempy
-
 	   !print*, 'new new arr', arr	   
 
 	   call quick_sort(arr, low, j-1) 
 	   !print*, 'high', high          
 	   call quick_sort(arr, j+1, high)
-
 	endif        
 	
 	return
@@ -622,7 +660,6 @@ MODULE m_mode_singleAttrib
      ! algorithm used to find the convex hull area of an object
       Subroutine polygon_area (set, array_size, area_hull)
 	 Implicit None
-
 	 type(point), pointer, intent(in)	:: set(:)
 	 integer, intent(in)			:: array_size
 
@@ -653,7 +690,6 @@ MODULE m_mode_singleAttrib
 		xmax = set(i)%x
 	    Endif
 	 Enddo
-
 	 !print*, 'ymin, ymax, xmax, xmin', ymin, ymax, xmax, xmin
 
 	 If (array_size .LE. 4) then
@@ -672,7 +708,6 @@ MODULE m_mode_singleAttrib
 
 	   	  xmayor = set(i)%x
 		  xmenor = set(j)%x
-
 		  !print*, 'i,j, xmayor, xmenor', i,j, xmayor, xmenor
 
 		  if (xmayor .LT. xmenor) then
@@ -680,7 +715,6 @@ MODULE m_mode_singleAttrib
 		     xmayor = xmenor
 		     xmenor = temp
 		  endif
-
 		  !print*, 'xmayor, xmenor', xmayor, xmenor
 
 		  if (set(j)%y .NE. set(i)%y) then
@@ -696,7 +730,6 @@ MODULE m_mode_singleAttrib
 		        k = k + 1
 		     endif
 		  endif
-
 		  !print*, 'k, area_hull', k, area_hull
 
 		  if ( (x .LT. xmayor) .AND. (x .GE. xmenor)) then
@@ -716,9 +749,7 @@ MODULE m_mode_singleAttrib
 	 Endif
 	 return
       End Subroutine
-
-
-
+    !**************************************************************************************************************************************
 
 
 

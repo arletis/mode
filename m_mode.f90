@@ -29,10 +29,15 @@
 
 MODULE mode
 
-   USE scamtec_module                 ! module where the structure samtec is defined
-   USE SCAM_dataMOD, only : scamdata  ! SCANTEC data matrix
-   USE m_mode_objects
-   USE m_mode_singleAttrib
+   USE scamtec_module                 		! module where the structure scantec is defined
+   USE SCAM_dataMOD, only : scamdata  		! SCANTEC data matrix
+   USE SCAM_Utils
+   USE time_module, only: jul2cal, cal2jul 	! Time operations
+   USE m_string                      		! string manipulations
+   USE m_die                         		! Error Messages
+   USE m_mode_objects		      		! module where objects are identified
+   USE m_mode_singleAttrib	      		! module where single objects attributes are calculated
+   USE m_mode_pairAttrib	      		! module where pair objects attributes are calculated
 
    IMPLICIT NONE
    PRIVATE
@@ -46,8 +51,40 @@ MODULE mode
    real, allocatable :: precOriginalField(:,:)  ! Matrix to save precipitation observation data 
    real, allocatable :: expOriginalField(:,:)   ! Matrix to save precipitation experiment data 
 
+   ! Statistical indices
+   integer			:: hits, false_alarms, misses
+   real				:: CSI, POD, FAR, BIAS
+
+   !character(len=512) :: filename, fmt
+   character(len=512) :: FNameOut = '%iy4%im2%id2%ih2%fy4%fm2%fd2%fh2'
+   integer            :: FUnitOut = 30
+
+   type statistic
+     integer(I4B) 	:: atime
+     integer, allocatable  :: fcst_time(:)
+     integer, allocatable  :: misses(:), falseAlarms(:), hits(:)
+     real, allocatable	:: csi(:)
+     real, allocatable	:: pod(:)
+     real, allocatable	:: far(:)
+     real, allocatable	:: vies(:)
+   end type statistic
+
+   type(statistic), allocatable :: indices(:,:)
+
+   integer, public, Parameter :: NumIndices = 8
+   character(len=8), public, parameter ::   IndicesName(1:NumIndices) = (/ &
+                                           'Forecast',& ! Virtual Temperature @ 925 hPa [K]
+                                           'Misses',& ! Virtual Temperature @ 850 hPa [K]
+                                           'FAlarms',& ! Virtual Temperature @ 500 hPa [K]                                           
+                                           'Hits',& ! Absolute Temperature @ 850 hPa [K]
+                                           'CSI',& ! Absolute Temperature @ 500 hPa [K]
+                                           'POD',& ! Absolute Temperature @ 250 hPa [K]
+                                           'FAR',& ! Pressure reduced to MSL [hPa]
+					   'BIAS' & ! CONVECTIVE PRECIPITATION @ 1000 hPa [kg/m2/day]
+                                          /)
 
    public :: mode_init
+   public :: mode_ObjectIdentf
    public :: mode_run
 
 
@@ -75,10 +112,30 @@ MODULE mode
          expfield => scamdata(nexp)%expfield           
 
 	 ! Convirtiendo el vector de los datos de precipitacion para una matriz 
-	 precOriginalField = RESHAPE(prefield, (/scamtec%nypt,scamtec%nxpt/))
-	 expOriginalField = RESHAPE(expfield, (/scamtec%nypt,scamtec%nxpt/))         
+	 precOriginalField = RESHAPE(prefield(:,21), (/scamtec%nypt,scamtec%nxpt/))
+	 expOriginalField = RESHAPE(expfield(:,hist%tipo_precip), (/scamtec%nypt,scamtec%nxpt/))      
 
-         print*,'mode_init'
+         !open(46,file=trim(scamtec%output_dir)//'/'//'EXP_precip'//'.bin',form='unformatted',status='unknown',access = 'sequential')         
+         !write(46)expOriginalField 
+
+         !print*,'mode_init' 
+
+	 !print*,'Min/Max PREFIELD_MODE: ',minval(precOriginalField(:,:)),maxval(precOriginalField(:,:))  
+
+         !print*,'Min/Max EXPFIELD_MODE: ',minval(expOriginalField(:,:)),maxval(expOriginalField(:,:))  
+         !stop  
+
+         if(.NOT.Allocated(indices))Allocate(indices(scamtec%nexp,scamtec%ntime_forecast))
+
+         !print*, 'scamtec%ntime_forecast', scamtec%ntime_forecast
+ 	 if(.NOT.Allocated(indices(nexp,scamtec%ftime_count(1))%fcst_time))Allocate(indices(nexp,scamtec%ftime_count(1))%fcst_time(scamtec%ntime_forecast-1))
+	 if(.NOT.Allocated(indices(nexp,scamtec%ftime_count(1))%misses))Allocate(indices(nexp,scamtec%ftime_count(1))%misses(scamtec%ntime_forecast-1))
+	 if(.NOT.Allocated(indices(nexp,scamtec%ftime_count(1))%falseAlarms))Allocate(indices(nexp,scamtec%ftime_count(1))%falseAlarms(scamtec%ntime_forecast-1))
+	 if(.NOT.Allocated(indices(nexp,scamtec%ftime_count(1))%hits))Allocate(indices(nexp,scamtec%ftime_count(1))%hits(scamtec%ntime_forecast-1))	
+	 if(.NOT.Allocated(indices(nexp,scamtec%ftime_count(1))%csi))Allocate(indices(nexp,scamtec%ftime_count(1))%csi(scamtec%ntime_forecast-1))
+         if(.NOT.Allocated(indices(nexp,scamtec%ftime_count(1))%pod))Allocate(indices(nexp,scamtec%ftime_count(1))%pod(scamtec%ntime_forecast-1))
+	 if(.NOT.Allocated(indices(nexp,scamtec%ftime_count(1))%far))Allocate(indices(nexp,scamtec%ftime_count(1))%far(scamtec%ntime_forecast-1))
+	 if(.NOT.Allocated(indices(nexp,scamtec%ftime_count(1))%vies))Allocate(indices(nexp,scamtec%ftime_count(1))%vies(scamtec%ntime_forecast-1))
 
       End Subroutine mode_init
     !**************************************************************************************************************************************
@@ -109,219 +166,254 @@ MODULE mode
 
 
     !**************************************************************************************************************************************
-      SUBROUTINE mode_run(nexp)
+      Subroutine mode_run(nexp)
          Implicit None
          integer, intent(in) :: nexp ! experiment number
 
-	 real, allocatable    		:: cfilter(:,:)      ! Matrix to save circular filter's values
-	 real, allocatable    		:: convField(:,:)    ! Field resulting of convolution process
-	 integer, allocatable 		:: maskField(:,:)    ! Binary field -mask- resulting of tresholding process 
-	 real, allocatable    		:: restoreField(:,:) ! Matrix to save original field values where the mask is 1
-	 real    			:: treshold	     ! Precipitation threshold defined by the user
+			   ! dimensions of the fields to compare and loop variables
+         integer 	:: rowSize, colSize, i, j, t, f  
 
-         ! Radio and threshold values should be defined in scamtec.conf
-	 integer 			:: i, j, rowSize, colSize, radio, binary_treshold=1, is_valid, totalObj, cont	 
+	 		   ! Weights of the attributes used in the fuzzy logic
+	 real		:: min_boundary_dist_weight, dif_centroid_weight, area_ratio_weight, perimeter_ratio_weight, dif_angle_weight, aspect_ratio_weight, complexity_ratio_weight, int_area_ratio_weight, weight(8), total_interest_tresh, grid_res  
 
-	 integer, allocatable   	:: mask(:,:), maskObj(:,:) ! Mask to count objects -> resulting of Object Identification Algorithm 	 
-	 ! objects attributes 
-	 integer			:: perimeter, area, xcent, ycent
-	 real				:: angle, aspect_ratio, complexity, area_hull 
-	 type(mark), pointer		:: per_linked, total_linked 
+	 real, allocatable		:: obsConvField(:,:)    ! Field resulting of convolution process
+	 real, allocatable		:: expConvField(:,:)    ! Field resulting of convolution process         
+	 real, allocatable		:: obsRestoreField(:,:) ! Matrix to save original field values where the mask is 1
+	 real, allocatable		:: expRestoreField(:,:) ! Matrix to save original field values where the mask is 1
+       
 
-	 real				:: area_tresh  ! Area threshold defined according to the area of interest to the user (scamtec.conf)
+					  ! Mask to count objects -> resulting of Object Identification Algorithm
+         integer, allocatable   	:: mask(:,:), obs_maskObj(:,:), exp_maskObj(:,:) 
 
-	 type(attrs), pointer		:: objects(:)
-	 type(attrs_linked), pointer	:: objects_linked => NULL()
-	 type(attrs_linked), pointer	:: attrs_aux => NULL()
-	 type(attrs_linked), pointer	:: dir_aux => NULL()
-	 type(mark), pointer		:: dir
+					  ! Identified objects total (Observation and Forecast)
+         integer 			:: prec_nobj, exp_nobj
 
-         real, allocatable    		:: TESTE(:,:) ! EXEMPLOS PARA COMPROVAR OS ALGORITMOS
-	 
-	 call mode_init(nexp)
+					  ! List to save objects and attributes (Observation and Forecast)
+         type(attrs), pointer		:: prec_objects(:), exp_objects(:)
+         type(atrib_pair), pointer	:: atrib_matched(:)
 
+					  ! Masks resulting of Matching Algorithm (Objects pairs have the same id in each field)
+	 integer, allocatable   	:: obsMatch_mask(:,:), expMatch_mask(:,:)
+					  ! Auxiliary variables used in the Matching Algorithm
+	 integer			:: fcst_id, obs_id, num, x, y, cont 
+         type(attrs)			:: objaux
 
-	 ! EXEMPLOS PARA COMPROVAR OS ALGORITMOS	 
-	 rowSize=15
-	 colSize=5
-	 ! os valores do radio e o limiar devem ser definidos no scamtec.conf
-	 radio=1
-         treshold=0.5
-	 area_tresh=2
+!					  ! Statistical indices
+!	 integer			:: hits, false_alarms, misses
+!	 real				:: CSI, POD, FAR, BIAS
 
-	 allocate(TESTE(rowSize,colSize))
-	 
-	 allocate( convField(rowSize,colSize), maskField(rowSize,colSize), restoreField(rowSize,colSize) )	 	 
-	 allocate( mask(rowSize,colSize), maskObj(rowSize,colSize) )
+         call mode_init(nexp)
 
+         rowSize = scamtec%nypt
+         colSize = scamtec%nxpt          
 
-	 	 
- 
-	 !**** TESTE  *************
+         grid_res = 0.400  ! Este valor creo q es dom(I)%x  
 
-	 TESTE = 0
-	 mask = 0
-         maskObj = 0
+         ! Attributes weight used in Merging and Matching process
+         min_boundary_dist_weight = 0.0
+	 dif_centroid_weight = 4.0
+	 area_ratio_weight = 2.0
+	 perimeter_ratio_weight = 0.0
+	 dif_angle_weight = 1.0
+	 aspect_ratio_weight = 0.0
+	 complexity_ratio_weight = 0.0
+	 int_area_ratio_weight = 2.0
+	 total_interest_tresh = 0.5
 
-	 TESTE(1,1)=60.0
-	 TESTE(1,2)=60.0
-	 TESTE(2,1)=60.0
-	 TESTE(2,2)=59.9
-	 TESTE(2,3)=59
-	 TESTE(2,4)=60.0
-	 TESTE(3,2)=59.0
-	 TESTE(3,3)=50
-	 TESTE(5,1)=52
-	 TESTE(5,4)=52
-	 TESTE(5,5)=30
-	 TESTE(6,1)=30.01
-	 TESTE(6,5)=30.01
-	 TESTE(7,1)=32.1
-	 TESTE(7,2)=32.1
-	 TESTE(7,3)=30.01
-	 TESTE(7,4)=32.1
-	 TESTE(7,5)=32.2
-	 TESTE(8,2)=32.1
-	 TESTE(8,3)=32.1
-	 TESTE(8,5)=32.25 
-	 TESTE(9,1)=32.25 
-	 TESTE(9,2)=32.25
-         TESTE(9,5)=42
-	 TESTE(10,5)=32.25	
-	 TESTE(11,5)=42
-	 TESTE(12,4)=42
-	 TESTE(12,5)=32.25
-	 TESTE(13,4)=32.25
-	 TESTE(13,5)=32.251
-	 TESTE(14,3)=32.25
-	 TESTE(14,5)=32.25
-
-	 print*
-         print*, ' **** TESTE *****'
-	 Do i=1, rowSize
-	    write(*,*) (TESTE(i,j), j=1, colSize)
-         ENDDO
- 	
-	 print*
-         print*,' **** CIRCULAR FILTER ***** '
-
-	 ! Calculate Circular filter
-	 call circular_filter(cfilter, radio)
-	 
-            DO i=1, 3
-               write(*,*) (cfilter(i,j), j=1, 3)
-            ENDDO
-
-	 print*	 
-	 print*,' **** CONVOLUTION **** '
-
-	 ! Convolution process
-         call convolution(convField, TESTE, cfilter, rowSize, colSize)
+         weight(1) = min_boundary_dist_weight
+	 weight(2) = dif_centroid_weight 
+	 weight(3) = area_ratio_weight
+	 weight(4) = perimeter_ratio_weight
+	 weight(5) = dif_angle_weight
+	 weight(6) = aspect_ratio_weight
+	 weight(7) = complexity_ratio_weight
+	 weight(8) = int_area_ratio_weight	 
+	        
+         f = scamtec%ftime_idx 
          
-         DO i=1, rowSize            
-               write(*,*) (convField(i,j), j=1, colSize)            
-         ENDDO
+	      ! Subroutine defined in m_mode_objects where convolution, tresholding, identification of objects, attributes calculation and 
+	      ! merging algorithms are made
+	 ! Observation
+         call mode_ObjectIdentf(rowSize, colSize, precOriginalField, obsConvField, obsRestoreField, weight, total_interest_tresh, grid_res, mask, obs_maskObj, prec_nobj, prec_objects)
+            !print*
+	    !print*, 'prec_nobj', prec_nobj
+            ! imprimiendo campo objeto.
+	    !DO i=1, rowSize            
+               !write(*,*) (mask(i,j), j=1, colSize)         
+            !ENDDO
 
-	 print*
-	 print*,' **** tresholding ****'
-
-	 ! Tresholding process
-         call tresholding(TESTE, convField, maskField, restoreField, rowSize, colSize, treshold)
-
-	 DO i=1, rowSize            
-               write(*,*) (maskField(i,j), j=1, colSize)             
-         ENDDO
-	 print*
-	 DO i=1, rowSize            
-               write(*,*) (restoreField(i,j), j=1, colSize)         
-         ENDDO
-
-	 ! Loop to identify objects (rain areas) and attributes of each object
-         print*
-	 print*,' **** Object Identification ****'
-         totalObj=0
-	 DO j=1, colSize
-	    DO i=1, rowSize            
-               call valid(restoreField, rowSize, colSize, i, j, treshold, is_valid)		
-	       if (is_valid .and. (mask(i,j) .EQ. 0) ) then		  
-                  call singleObj_Ident_Attrib(i, j, restoreField, rowSize, colSize, treshold, mask, totalObj, maskObj, perimeter, area, xcent, ycent, angle, aspect_ratio, area_hull, complexity, per_linked, total_linked)		  
-	
-		  if (area .GE. area_tresh) then ! Creating temporal list to save objects attributes
-		     allocate(attrs_aux)
-		     allocate(attrs_aux%next)
-		     attrs_aux%next => objects_linked
-		     objects_linked => attrs_aux
-
-		     objects_linked%xcent = xcent
-		     objects_linked%ycent = ycent
-		     objects_linked%area = area
-		     objects_linked%perimeter = perimeter
-		     objects_linked%angle = angle
-		     objects_linked%aspect_ratio = aspect_ratio
-		     objects_linked%complexity = complexity
-		     objects_linked%area_hull = area_hull
-
-		     allocate(objects_linked%pts_per(perimeter))
-		     dir => per_linked
-	    	     cont = 0 
-		     do while (associated(dir))
-			objects_linked%pts_per(cont+1)%x = dir%x 
-			objects_linked%pts_per(cont+1)%y = dir%y
-			dir => dir%next
-			cont = cont+1
-		     enddo
-
-		     allocate(objects_linked%total_pts(area))
-		     dir => total_linked
-	    	     cont = 0 
-		     do while (associated(dir))
-			objects_linked%total_pts(cont+1)%x = dir%x 
-			objects_linked%total_pts(cont+1)%y = dir%y
-			dir => dir%next
-			cont = cont+1
-		     enddo
-
-		     totalObj = totalObj + 1		     		     
-		  endif          	       
-	       endif	       
-            ENDDO
-         ENDDO
-
-	 ! Save the attributes into an array
-	 allocate(objects(totalObj))
-	 dir_aux => objects_linked
-	 i=0
-	 Do while ()
-
-	 Enddo
-
-	 DO i=1, rowSize            
-               write(*,*) (mask(i,j), j=1, colSize)         
-         ENDDO
-
-	 print*
-	 DO i=1, rowSize            
-               write(*,*) (maskObj(i,j), j=1, colSize)         
-         ENDDO
-
+	    !print*
+	    !DO i=1, rowSize            
+               !write(*,*) (obs_maskObj(i,j), j=1, colSize)         
+            !ENDDO                        
          
+	 ! Forecast
+         call mode_ObjectIdentf(rowSize, colSize, expOriginalField, expConvField, expRestoreField, weight, total_interest_tresh, grid_res, mask, exp_maskObj, exp_nobj, exp_objects)
+            !print*
+	    !print*, 'exp_nobj', exp_nobj
+	    !DO i=1, rowSize            
+               !write(*,*) (mask(i,j), j=1, colSize)         
+            !ENDDO
 
-         deallocate (cfilter)
-	 deallocate (convField)
-	 deallocate (maskField)
-	 deallocate (TESTE)
+	    !print*
+	    !DO i=1, rowSize            
+               !write(*,*) (exp_maskObj(i,j), j=1, colSize)         
+            !ENDDO	    
+         
+	 
+         If  (f .GT. 1) then
+	     ! Subroutine defined in m_mode_pairAttrib where observation objects attributes and forecast objects attributes are compared to select pair objects         
+           call object_matching(prec_nobj, prec_objects, exp_nobj, exp_objects, weight, grid_res, total_interest_tresh, atrib_matched, cont)
+         !stop
+           allocate(obsMatch_mask(rowSize,colSize))
+	   allocate(expMatch_mask(rowSize,colSize))
+	 
+!          obsMatch_mask = obs_maskObj
+!	   expMatch_mask = exp_maskObj
 
+           obsMatch_mask = 0
+	   expMatch_mask = 0	 
+         
+           num = 1
+	   do i=1, cont
+	     fcst_id = atrib_matched(i)%id1
+	     obs_id = atrib_matched(i)%id2           
 
+	     objaux = prec_objects(obs_id)
+	     !print*, 'prec_objects(obs_id)total_pts', prec_objects(obs_id)%total_pts
+             do j=1, objaux%area
+	       x = objaux%total_pts(j)%x
+	       y = objaux%total_pts(j)%y
+	     
+	       obsMatch_mask(y,x) = num
+	     enddo
 
-      END SUBROUTINE mode_run
-    !**************************************************************************************************************************************    
+	     objaux = exp_objects(fcst_id)
 
+             do j=1, objaux%area
+	       x = objaux%total_pts(j)%x
+	       y = objaux%total_pts(j)%y
+	     
+	       expMatch_mask(y,x) = num
+	     enddo
+             num = num + 1	   
+           enddo	   
 
+	   !print*
+           !DO i=1, rowSize            
+             !write(*,*) (obsMatch_mask(i,j), j=1, colSize)         
+           !ENDDO
 
-    
+	   !print*
+	   !DO i=1, rowSize            
+             !write(*,*) (expMatch_mask(i,j), j=1, colSize)         
+           !ENDDO	 
 
+	   call mode_finalize(nexp)         
 
-    
+	 !*********** Object-based Statistical Índices *********************************
+
+	 misses = abs(prec_nobj - cont)
+	 false_alarms = abs(exp_nobj - cont)
+	 hits = cont
+
+	 print*
+	 print*, 'misses', misses, 'false_alarms', false_alarms, 'hits', hits
+
+	 CSI = REAL(hits) / (REAL(hits) + REAL(misses) + REAL(false_alarms))
+	 print*
+	 print*,  'CSI', CSI
+
+	 POD = REAL(hits) / (REAL(hits) + REAL(misses))
+	 print*
+	 print*,  'POD', POD
+
+	 FAR = REAL(false_alarms) / (REAL(hits) + REAL(false_alarms))
+	 print*
+	 print*,  'FAR', FAR
+
+	 BIAS = (REAL(hits) + REAL(false_alarms)) / (REAL(hits) + REAL(misses))
+	 print*
+	 print*, 'BIAS', BIAS        
+
+	indices(nexp,scamtec%ftime_count(1))%atime = scamtec%atime
+	indices(nexp,scamtec%ftime_count(1))%fcst_time(scamtec%ftime_idx-1) = int(abs(cal2jul(scamtec%atime)-cal2jul(scamtec%ftime))*24)
+	indices(nexp,scamtec%ftime_count(1))%misses(scamtec%ftime_idx-1) = misses
+	indices(nexp,scamtec%ftime_count(1))%falseAlarms(scamtec%ftime_idx-1) = false_alarms
+	indices(nexp,scamtec%ftime_count(1))%hits(scamtec%ftime_idx-1) = hits
+        indices(nexp,scamtec%ftime_count(1))%csi(scamtec%ftime_idx-1) = CSI
+        indices(nexp,scamtec%ftime_count(1))%pod(scamtec%ftime_idx-1) = POD
+	indices(nexp,scamtec%ftime_count(1))%far(scamtec%ftime_idx-1) = FAR
+	indices(nexp,scamtec%ftime_count(1))%vies(scamtec%ftime_idx-1) = BIAS
+
+	if (scamtec%ftime_idx .EQ. scamtec%ntime_forecast) then
+	   call mode_write(nexp)	   
+        endif
+      Endif
+        
+
+      End Subroutine mode_run
+    !**************************************************************************************************************************************
+  
+
+    !**************************************************************************************************************************************
+      Subroutine mode_write(nexp)
+	Implicit None
+        integer, intent(in) :: nexp ! experiment number
+	integer            :: iret, nparameters, i
+	character(len=512) :: filename, fname, fmt
+	integer            :: nymd, nhms
+    	integer            :: fymd, fhms
+
+	integer(I4B) 	:: a
+     	integer	:: b,c,d,e     	
+     	real	:: f,g,h,j
+
+        fname = 'StatisticIndices'
+	nparameters = 9
+
+	inquire(unit=FUnitOut, opened=iret)
+	if(.not.iret) then
+
+          nymd = scamtec%atime/100
+          nhms = MOD(scamtec%atime,100) * 10000
+          fymd = scamtec%ftime/100
+          fhms = MOD(scamtec%ftime,100) * 10000
+
+	  filename = trim(fname)//'_'//trim(FNameOut)
+
+          call str_template(filename, nymd, nhms, fymd, fhms, label=num2str(nexp,'(I2.2)'))
+
+	  open(unit   = FUnitOut,	&
+	       File   = trim(scamtec%output_dir)//Trim(filename)//'T.scam',   &
+               access = 'sequential',  &
+               Form   = 'formatted', &
+               Status = 'replace'      &
+              )
+
+	  write(FUnitOut,'(A)')'%Analysis    Forecast    Misses   FAlarms  Hits      CSI         POD       FAR       BIAS'
+
+	  Do i=1, scamtec%ftime_idx-1
+	    a = indices(nexp,scamtec%ftime_count(1))%atime
+	    b = indices(nexp,scamtec%ftime_count(1))%fcst_time(i)
+	    c = indices(nexp,scamtec%ftime_count(1))%misses(i)
+	    d = indices(nexp,scamtec%ftime_count(1))%falseAlarms(i)
+	    e = indices(nexp,scamtec%ftime_count(1))%hits(i)
+	    f = indices(nexp,scamtec%ftime_count(1))%csi(i)
+	    g = indices(nexp,scamtec%ftime_count(1))%pod(i)
+	    h = indices(nexp,scamtec%ftime_count(1))%far(i)
+	    j = indices(nexp,scamtec%ftime_count(1))%vies(i)
+	    
+	    write(FUnitOut,95)a,b,c,d,e,f,g,h,j
+95          FORMAT(I10,6X,I2,3X,3(7X,I1),2X,4(3X,F8.6))
+	  Enddo
+  	  close(FUnitOut)
+	  
+        endif	
+
+      End Subroutine mode_write
+    !**************************************************************************************************************************************
+  
 
 
 
