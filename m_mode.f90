@@ -171,7 +171,7 @@ MODULE mode
          integer, intent(in) :: nexp ! experiment number
 
 			   ! dimensions of the fields to compare and loop variables
-         integer 	:: rowSize, colSize, i, j, t, f  
+         integer 	:: rowSize, colSize, i, j, t, f, idField  
 
 	 		   ! Weights of the attributes used in the fuzzy logic
 	 real		:: min_boundary_dist_weight, dif_centroid_weight, area_ratio_weight, perimeter_ratio_weight, dif_angle_weight, aspect_ratio_weight, complexity_ratio_weight, int_area_ratio_weight, weight(8), total_interest_tresh, grid_res  
@@ -245,7 +245,10 @@ MODULE mode
 	    !print*
 	    !DO i=1, rowSize            
                !write(*,*) (obs_maskObj(i,j), j=1, colSize)         
-            !ENDDO                        
+            !ENDDO
+	 idField = 1  
+	 call mode_writeFields(nexp, idField, precOriginalField, obsConvField, mask, obsRestoreField) 
+	 stop                     
          
 	 ! Forecast
          call mode_ObjectIdentf(rowSize, colSize, expOriginalField, expConvField, expRestoreField, weight, total_interest_tresh, grid_res, mask, exp_maskObj, exp_nobj, exp_objects)
@@ -258,7 +261,8 @@ MODULE mode
 	    !print*
 	    !DO i=1, rowSize            
                !write(*,*) (exp_maskObj(i,j), j=1, colSize)         
-            !ENDDO	    
+            !ENDDO
+	 idField = 0	    
          
 	 
          If  (f .GT. 1) then
@@ -347,6 +351,7 @@ MODULE mode
 	indices(nexp,scamtec%ftime_count(1))%vies(scamtec%ftime_idx-1) = BIAS
 
 	if (scamtec%ftime_idx .EQ. scamtec%ntime_forecast) then
+	   !nprint = 3
 	   call mode_write(nexp)	   
         endif
       Endif
@@ -354,6 +359,81 @@ MODULE mode
 
       End Subroutine mode_run
     !**************************************************************************************************************************************
+
+
+    !**************************************************************************************************************************************
+      Subroutine mode_writeFields(nexp, id, Original, Convolution, Mask, Restored)
+        Implicit None
+        integer, intent(in) :: nexp,  id ! experiment number
+	real, allocatable, intent(in) 		:: Original(:,:)
+	real, allocatable, intent(in)		:: Convolution(:,:)    ! Field resulting of convolution process
+	real, allocatable, intent(in)		:: Restored(:,:)
+        integer, allocatable, intent(in)   	:: Mask(:,:) ! Mask to count objects -> resulting of Object Identification Algorithm
+	 
+	integer            :: iret, i,j
+	character(len=512) :: filename, fname, fmt
+	integer            :: nymd, nhms
+    	integer            :: fymd, fhms	
+
+        nymd = scamtec%atime/100
+        nhms = MOD(scamtec%atime,100) * 10000
+        fymd = scamtec%ftime/100
+        fhms = MOD(scamtec%ftime,100) * 10000
+
+	If (id .EQ. 1) then
+	  fname = 'PrecipField'
+	  inquire(unit=FUnitOut, opened=iret)
+	  if(.not.iret) then 
+	    filename = trim(fname)//'_'//trim(FNameOut)
+            call str_template(filename, nymd, nhms, fymd, fhms, label=num2str(nexp,'(I2.2)'))
+
+	    open(unit   = FUnitOut+0,	&
+	         File   = trim(scamtec%output_dir)//'/Original'//Trim(filename)//'T.scam',   &
+                 access = 'sequential',  &
+                 Form   = 'unformatted', &
+                 Status = 'replace'      &
+                )
+
+	    open(unit   = FUnitOut+1,	&
+	         File   = trim(scamtec%output_dir)//'/Convolution'//Trim(filename)//'T.scam',   &
+                 access = 'sequential',  &
+                 Form   = 'unformatted', &
+                 position = 'append'      &
+                )
+
+	    open(unit   = FUnitOut+2,	&
+	         File   = trim(scamtec%output_dir)//'/Mask'//Trim(filename)//'T.scam',   &
+                 access = 'sequential',  &
+                 Form   = 'unformatted', &
+                 position = 'append'      &
+                )
+
+	    open(unit   = FUnitOut+3,	&
+	         File   = trim(scamtec%output_dir)//'/Restored'//Trim(filename)//'T.scam',   &
+                 access = 'sequential',  &
+                 Form   = 'unformatted', &
+                 position = 'append'      &
+                )
+
+	    !Do i=1, scamtec%nypt
+	      !Do j=1, scamtec%nxpt
+	        !write(FUnitOut+0)Original(i,j)
+	        write(FUnitOut+0)Original
+	        write(FUnitOut+1)Convolution
+	    !write(FUnitOut+1)Convolution(:,j)
+	    !write(FUnitOut+2)Mask(:,j)
+	    !write(FUnitOut+3)Restored(:,j)
+	      !Enddo
+	    !Enddo
+	    Close(FUnitOut+0)
+            Close(FUnitOut+1)
+    	    Close(FUnitOut+2)
+    	    Close(FUnitOut+3)
+	  endif
+	Endif
+      End Subroutine mode_writeFields
+    !**************************************************************************************************************************************
+      
   
 
     !**************************************************************************************************************************************
@@ -369,47 +449,46 @@ MODULE mode
      	integer	:: b,c,d,e     	
      	real	:: f,g,h,j
 
-        fname = 'StatisticIndices'
-	nparameters = 9
+        nymd = scamtec%atime/100
+        nhms = MOD(scamtec%atime,100) * 10000
+        fymd = scamtec%ftime/100
+        fhms = MOD(scamtec%ftime,100) * 10000	
 
-	inquire(unit=FUnitOut, opened=iret)
-	if(.not.iret) then
+        !If (nprint .EQ. 3) then
+          fname = 'StatisticIndices'
+	  nparameters = 9
 
-          nymd = scamtec%atime/100
-          nhms = MOD(scamtec%atime,100) * 10000
-          fymd = scamtec%ftime/100
-          fhms = MOD(scamtec%ftime,100) * 10000
+	  inquire(unit=FUnitOut+5, opened=iret)
+	  if(.not.iret) then 
+	    filename = trim(fname)//'_'//trim(FNameOut)
+            call str_template(filename, nymd, nhms, fymd, fhms, label=num2str(nexp,'(I2.2)'))
 
-	  filename = trim(fname)//'_'//trim(FNameOut)
+	    open(unit   = FUnitOut+5,	&
+	         File   = trim(scamtec%output_dir)//Trim(filename)//'T.scam',   &
+                 access = 'sequential',  &
+                 Form   = 'formatted', &
+                 Status = 'replace'      &
+                )
 
-          call str_template(filename, nymd, nhms, fymd, fhms, label=num2str(nexp,'(I2.2)'))
+	    write(FUnitOut+5,'(A)')'%Analysis    Forecast    Misses   FAlarms  Hits      CSI         POD       FAR       BIAS'
 
-	  open(unit   = FUnitOut,	&
-	       File   = trim(scamtec%output_dir)//Trim(filename)//'T.scam',   &
-               access = 'sequential',  &
-               Form   = 'formatted', &
-               Status = 'replace'      &
-              )
-
-	  write(FUnitOut,'(A)')'%Analysis    Forecast    Misses   FAlarms  Hits      CSI         POD       FAR       BIAS'
-
-	  Do i=1, scamtec%ftime_idx-1
-	    a = indices(nexp,scamtec%ftime_count(1))%atime
-	    b = indices(nexp,scamtec%ftime_count(1))%fcst_time(i)
-	    c = indices(nexp,scamtec%ftime_count(1))%misses(i)
-	    d = indices(nexp,scamtec%ftime_count(1))%falseAlarms(i)
-	    e = indices(nexp,scamtec%ftime_count(1))%hits(i)
-	    f = indices(nexp,scamtec%ftime_count(1))%csi(i)
-	    g = indices(nexp,scamtec%ftime_count(1))%pod(i)
-	    h = indices(nexp,scamtec%ftime_count(1))%far(i)
-	    j = indices(nexp,scamtec%ftime_count(1))%vies(i)
+	    Do i=1, scamtec%ftime_idx-1
+	      a = indices(nexp,scamtec%ftime_count(1))%atime
+	      b = indices(nexp,scamtec%ftime_count(1))%fcst_time(i)
+	      c = indices(nexp,scamtec%ftime_count(1))%misses(i)
+	      d = indices(nexp,scamtec%ftime_count(1))%falseAlarms(i)
+	      e = indices(nexp,scamtec%ftime_count(1))%hits(i)
+	      f = indices(nexp,scamtec%ftime_count(1))%csi(i)
+	      g = indices(nexp,scamtec%ftime_count(1))%pod(i)
+	      h = indices(nexp,scamtec%ftime_count(1))%far(i)
+	      j = indices(nexp,scamtec%ftime_count(1))%vies(i)
 	    
-	    write(FUnitOut,95)a,b,c,d,e,f,g,h,j
-95          FORMAT(I10,6X,I2,3X,3(7X,I1),2X,4(3X,F8.6))
-	  Enddo
-  	  close(FUnitOut)
-	  
-        endif	
+	      write(FUnitOut+5,95)a,b,c,d,e,f,g,h,j
+95            FORMAT(I10,6X,I2,3X,3(7X,I1),2X,4(3X,F8.6))
+	    Enddo
+  	    close(FUnitOut+5)	  
+          endif	
+	!Endif
 
       End Subroutine mode_write
     !**************************************************************************************************************************************
