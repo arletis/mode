@@ -239,7 +239,7 @@ MODULE mode
 	    !print*, 'prec_nobj', prec_nobj
             ! imprimiendo campo objeto.
 	    !DO i=1, rowSize            
-               !write(*,*) (mask(i,j), j=1, colSize)         
+               !write(*,*) (obsConvField(i,j), j=1, colSize)         
             !ENDDO
 
 	    !print*
@@ -248,14 +248,14 @@ MODULE mode
             !ENDDO
 	 idField = 1  
 	 call mode_writeFields(nexp, idField, precOriginalField, obsConvField, mask, obsRestoreField) 
-	 stop                     
+	 !stop                     
          
 	 ! Forecast
          call mode_ObjectIdentf(rowSize, colSize, expOriginalField, expConvField, expRestoreField, weight, total_interest_tresh, grid_res, mask, exp_maskObj, exp_nobj, exp_objects)
             !print*
 	    !print*, 'exp_nobj', exp_nobj
 	    !DO i=1, rowSize            
-               !write(*,*) (mask(i,j), j=1, colSize)         
+               !write(*,*) (expOriginalField(i,j), j=1, colSize)         
             !ENDDO
 
 	    !print*
@@ -263,7 +263,8 @@ MODULE mode
                !write(*,*) (exp_maskObj(i,j), j=1, colSize)         
             !ENDDO
 	 idField = 0	    
-         
+         call mode_writeFields(nexp, idField, expOriginalField, expConvField, mask, expRestoreField) 
+	 stop                     
 	 
          If  (f .GT. 1) then
 	     ! Subroutine defined in m_mode_pairAttrib where observation objects attributes and forecast objects attributes are compared to select pair objects         
@@ -361,6 +362,7 @@ MODULE mode
     !**************************************************************************************************************************************
 
 
+
     !**************************************************************************************************************************************
       Subroutine mode_writeFields(nexp, id, Original, Convolution, Mask, Restored)
         Implicit None
@@ -370,7 +372,7 @@ MODULE mode
 	real, allocatable, intent(in)		:: Restored(:,:)
         integer, allocatable, intent(in)   	:: Mask(:,:) ! Mask to count objects -> resulting of Object Identification Algorithm
 	 
-	integer            :: iret, i,j
+	integer            :: iret, i,j, ier
 	character(len=512) :: filename, fname, fmt
 	integer            :: nymd, nhms
     	integer            :: fymd, fhms	
@@ -381,6 +383,7 @@ MODULE mode
         fhms = MOD(scamtec%ftime,100) * 10000
 
 	If (id .EQ. 1) then
+
 	  fname = 'PrecipField'
 	  inquire(unit=FUnitOut, opened=iret)
 	  if(.not.iret) then 
@@ -388,48 +391,84 @@ MODULE mode
             call str_template(filename, nymd, nhms, fymd, fhms, label=num2str(nexp,'(I2.2)'))
 
 	    open(unit   = FUnitOut+0,	&
-	         File   = trim(scamtec%output_dir)//'/Original'//Trim(filename)//'T.scam',   &
-                 access = 'sequential',  &
-                 Form   = 'unformatted', &
-                 Status = 'replace'      &
-                )
-
+	         File   = trim(scamtec%output_dir)//'/Original'//Trim(filename)//'.bin',   &
+	         status='unknown', &
+                 form   = 'unformatted', &
+                 access = 'sequential'  &                 
+		)
 	    open(unit   = FUnitOut+1,	&
-	         File   = trim(scamtec%output_dir)//'/Convolution'//Trim(filename)//'T.scam',   &
-                 access = 'sequential',  &
-                 Form   = 'unformatted', &
-                 position = 'append'      &
-                )
-
+	         File   = trim(scamtec%output_dir)//'/Convolution'//Trim(filename)//'.bin',   &
+                 status='unknown', &
+                 form   = 'unformatted', &
+                 access = 'sequential'  &                 
+		)
 	    open(unit   = FUnitOut+2,	&
-	         File   = trim(scamtec%output_dir)//'/Mask'//Trim(filename)//'T.scam',   &
-                 access = 'sequential',  &
-                 Form   = 'unformatted', &
-                 position = 'append'      &
-                )
-
+	         File   = trim(scamtec%output_dir)//'/Mask'//Trim(filename)//'.bin',   &
+                 status='unknown', &
+                 form   = 'unformatted', &
+                 access = 'sequential'  &                 
+		)
 	    open(unit   = FUnitOut+3,	&
-	         File   = trim(scamtec%output_dir)//'/Restored'//Trim(filename)//'T.scam',   &
-                 access = 'sequential',  &
-                 Form   = 'unformatted', &
-                 position = 'append'      &
-                )
+	         File   = trim(scamtec%output_dir)//'/Restored'//Trim(filename)//'.bin',   &
+                 status='unknown', &
+                 form   = 'unformatted', &
+                 access = 'sequential'  &                 
+		)
 
-	    !Do i=1, scamtec%nypt
-	      !Do j=1, scamtec%nxpt
-	        !write(FUnitOut+0)Original(i,j)
-	        write(FUnitOut+0)Original
-	        write(FUnitOut+1)Convolution
-	    !write(FUnitOut+1)Convolution(:,j)
-	    !write(FUnitOut+2)Mask(:,j)
-	    !write(FUnitOut+3)Restored(:,j)
-	      !Enddo
-	    !Enddo
+	    write(FUnitOut+0)Original	        
+	    write(FUnitOut+1)Convolution
+	    write(FUnitOut+2)Mask
+	    write(FUnitOut+3)Restored
+
 	    Close(FUnitOut+0)
             Close(FUnitOut+1)
     	    Close(FUnitOut+2)
     	    Close(FUnitOut+3)
 	  endif
+
+	Else
+
+	  fname = 'ExpField'
+	  inquire(unit=FUnitOut, opened=iret)
+	  if(.not.iret) then 
+	    filename = trim(fname)//'_'//trim(FNameOut)
+            call str_template(filename, nymd, nhms, fymd, fhms, label=num2str(nexp,'(I2.2)'))
+
+	    open(unit   = FUnitOut+4,	&
+	         File   = trim(scamtec%output_dir)//'/Original'//Trim(filename)//'.bin',   &
+	         status='unknown', &
+                 form   = 'unformatted', &
+                 access = 'sequential'  &                 
+		)
+	    open(unit   = FUnitOut+5,	&
+	         File   = trim(scamtec%output_dir)//'/Convolution'//Trim(filename)//'.bin',   &
+                 status='unknown', &
+                 form   = 'unformatted', &
+                 access = 'sequential'  &                 
+		)
+	    open(unit   = FUnitOut+6,	&
+	         File   = trim(scamtec%output_dir)//'/Mask'//Trim(filename)//'.bin',   &
+                 status='unknown', &
+                 form   = 'unformatted', &
+                 access = 'sequential'  &                 
+		)
+	    open(unit   = FUnitOut+7,	&
+	         File   = trim(scamtec%output_dir)//'/Restored'//Trim(filename)//'.bin',   &
+                 status='unknown', &
+                 form   = 'unformatted', &
+                 access = 'sequential'  &                 
+		)
+	    write(FUnitOut+4)Original	        
+	    write(FUnitOut+5)Convolution
+	    write(FUnitOut+6)Mask
+	    write(FUnitOut+7)Restored
+
+	    Close(FUnitOut+4)
+            Close(FUnitOut+5)
+    	    Close(FUnitOut+6)
+    	    Close(FUnitOut+7)
+	  endif
+
 	Endif
       End Subroutine mode_writeFields
     !**************************************************************************************************************************************
@@ -458,12 +497,12 @@ MODULE mode
           fname = 'StatisticIndices'
 	  nparameters = 9
 
-	  inquire(unit=FUnitOut+5, opened=iret)
+	  inquire(unit=FUnitOut+8, opened=iret)
 	  if(.not.iret) then 
 	    filename = trim(fname)//'_'//trim(FNameOut)
             call str_template(filename, nymd, nhms, fymd, fhms, label=num2str(nexp,'(I2.2)'))
 
-	    open(unit   = FUnitOut+5,	&
+	    open(unit   = FUnitOut+8,	&
 	         File   = trim(scamtec%output_dir)//Trim(filename)//'T.scam',   &
                  access = 'sequential',  &
                  Form   = 'formatted', &
@@ -483,10 +522,10 @@ MODULE mode
 	      h = indices(nexp,scamtec%ftime_count(1))%far(i)
 	      j = indices(nexp,scamtec%ftime_count(1))%vies(i)
 	    
-	      write(FUnitOut+5,95)a,b,c,d,e,f,g,h,j
+	      write(FUnitOut+8,95)a,b,c,d,e,f,g,h,j
 95            FORMAT(I10,6X,I2,3X,3(7X,I1),2X,4(3X,F8.6))
 	    Enddo
-  	    close(FUnitOut+5)	  
+  	    close(FUnitOut+8)	  
           endif	
 	!Endif
 
